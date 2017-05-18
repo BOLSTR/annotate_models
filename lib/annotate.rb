@@ -1,3 +1,5 @@
+# rubocop:disable  Metrics/ModuleLength
+
 $LOAD_PATH.unshift(File.dirname(__FILE__))
 require 'annotate/version'
 require 'annotate/annotate_models'
@@ -7,7 +9,7 @@ begin
   # ActiveSupport 3.x...
   require 'active_support/hash_with_indifferent_access'
   require 'active_support/core_ext/object/blank'
-rescue Exception
+rescue StandardError
   # ActiveSupport 2.x...
   require 'active_support/core_ext/hash/indifferent_access'
   require 'active_support/core_ext/blank'
@@ -29,15 +31,21 @@ module Annotate
     :exclude_fixtures, :exclude_factories, :ignore_model_sub_dir,
     :format_bare, :format_rdoc, :format_markdown, :sort, :force, :trace,
     :timestamp, :exclude_serializers, :classified_sort, :show_foreign_keys,
-    :exclude_scaffolds, :exclude_controllers, :exclude_helpers, :ignore_unknown_models
+    :exclude_scaffolds, :exclude_controllers, :exclude_helpers,
+    :exclude_sti_subclasses, :ignore_unknown_models
   ].freeze
   OTHER_OPTIONS = [
-    :ignore_columns, :skip_on_db_migrate, :wrapper_open, :wrapper_close, :wrapper, :routes,
-    :hide_limit_column_types, :ignore_routes, :active_admin
+    :ignore_columns, :skip_on_db_migrate, :wrapper_open, :wrapper_close,
+    :wrapper, :routes, :hide_limit_column_types, :hide_default_column_types,
+    :ignore_routes, :active_admin
   ].freeze
   PATH_OPTIONS = [
     :require, :model_dir, :root_dir
   ].freeze
+
+  def self.all_options
+    [POSITION_OPTIONS, FLAG_OPTIONS, PATH_OPTIONS, OTHER_OPTIONS]
+  end
 
   ##
   # Set default values that can be overridden via environment variables.
@@ -48,13 +56,13 @@ module Annotate
 
     options = HashWithIndifferentAccess.new(options)
 
-    [POSITION_OPTIONS, FLAG_OPTIONS, PATH_OPTIONS, OTHER_OPTIONS].flatten.each do |key|
+    all_options.flatten.each do |key|
       if options.key?(key)
         default_value = if options[key].is_a?(Array)
                           options[key].join(',')
                         else
                           options[key]
-        end
+                        end
       end
 
       default_value = ENV[key.to_s] unless ENV[key.to_s].blank?
@@ -80,7 +88,6 @@ module Annotate
     end
 
     options[:model_dir] = ['app/models'] if options[:model_dir].empty?
-    options[:root_dir] = [''] if options[:root_dir].empty?
 
     options[:wrapper_open] ||= options[:wrapper]
     options[:wrapper_close] ||= options[:wrapper]
@@ -94,9 +101,7 @@ module Annotate
   end
 
   def self.reset_options
-    [POSITION_OPTIONS, FLAG_OPTIONS, PATH_OPTIONS, OTHER_OPTIONS].flatten.each do |key|
-      ENV[key.to_s] = nil
-    end
+    all_options.flatten.each { |key| ENV[key.to_s] = nil }
   end
 
   def self.skip_on_migration?
@@ -123,18 +128,21 @@ module Annotate
     return if loaded_tasks
     self.loaded_tasks = true
 
-    Dir[File.join(File.dirname(__FILE__), 'tasks', '**/*.rake')].each { |rake| load rake }
+    Dir[File.join(File.dirname(__FILE__), 'tasks', '**/*.rake')].each do |rake|
+      load rake
+    end
   end
 
   def self.load_requires(options)
-    options[:require].each { |path| require path } if options[:require].count > 0
+    options[:require].count > 0 &&
+      options[:require].each { |path| require path }
   end
 
   def self.eager_load(options)
     load_requires(options)
     require 'annotate/active_record_patch'
 
-    if defined?(Rails)
+    if defined?(Rails::Application)
       if Rails.version.split('.').first.to_i < 3
         Rails.configuration.eager_load_paths.each do |load_path|
           matcher = /\A#{Regexp.escape(load_path)}(.*)\.rb\Z/
@@ -158,7 +166,7 @@ module Annotate
   def self.bootstrap_rake
     begin
       require 'rake/dsl_definition'
-    rescue Exception => e
+    rescue StandardError => e
       # We might just be on an old version of Rake...
       puts e.message
       exit e.status_code
